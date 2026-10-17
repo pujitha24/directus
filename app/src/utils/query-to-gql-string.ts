@@ -4,6 +4,7 @@ import { parseJSON, toArray } from '@directus/utils';
 import { jsonToGraphQLQuery } from 'json-to-graphql-query';
 import { isEmpty, isUndefined, omitBy, pick, set, transform } from 'lodash-es';
 import { extractFieldFromFunction } from './extract-field-from-function';
+import { getRelatedCollection, type RelatedCollectionData } from './get-related-collection';
 import { useFieldsStore } from '@/stores/fields';
 
 type QueryInfo = { collection: string; key: string; query: Query };
@@ -52,7 +53,7 @@ export function formatQuery({ collection, query }: QueryInfo): Record<string, an
 			formattedQuery.__args.groupBy = query.group;
 		}
 	} else {
-		for (const field of fields) {
+		for (const field of expandWildcards(collection, fields)) {
 			set(formattedQuery, field, true);
 		}
 	}
@@ -71,6 +72,32 @@ export function formatQuery({ collection, query }: QueryInfo): Record<string, an
 	}
 
 	return formattedQuery;
+}
+
+/**
+ * GraphQL has no wildcard selection, so expand any `*` into the collection's non-alias fields
+ */
+function expandWildcards(collection: string, fields: string[]): string[] {
+	const fieldsStore = useFieldsStore();
+
+	return fields.flatMap((field) => {
+		const parts = field.split('.');
+		if (parts.pop() !== '*') return field;
+
+		let current: string | undefined = collection;
+
+		for (const part of parts) {
+			const related: RelatedCollectionData | null = current ? getRelatedCollection(current, part) : null;
+			current = related ? (related.junctionCollection ?? related.relatedCollection) : undefined;
+		}
+
+		if (!current) return [];
+
+		return fieldsStore
+			.getFieldsForCollection(current)
+			.filter((f) => f.type !== 'alias')
+			.map((f) => [...parts, f.field].join('.'));
+	});
 }
 
 /**

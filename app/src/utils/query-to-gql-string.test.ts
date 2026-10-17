@@ -1,7 +1,9 @@
-import { Query } from '@directus/types';
+import { Field, Query } from '@directus/types';
 import { createTestingPinia } from '@pinia/testing';
 import { setActivePinia } from 'pinia';
-import { beforeEach, describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+import { useFieldsStore } from '@/stores/fields';
+import { useRelationsStore } from '@/stores/relations';
 import { formatQuery } from '@/utils/query-to-gql-string';
 
 const collectionName = 'users';
@@ -46,6 +48,34 @@ describe('Defined fields are requested', () => {
 			aaa: true,
 			bbb: true,
 			ccc: true,
+		});
+	});
+});
+
+describe('Wildcard fields are expanded', () => {
+	test('Nested wildcard becomes the non-alias fields of the related collection', () => {
+		setActivePinia(createTestingPinia({ createSpy: vi.fn }));
+
+		const fieldsStore = useFieldsStore();
+		const relationsStore = useRelationsStore();
+
+		vi.mocked(relationsStore.getRelationsForField).mockReturnValue([
+			{ collection: 'users_translations', field: 'users_id', related_collection: 'users', meta: null, schema: null },
+		]);
+
+		vi.mocked(fieldsStore.getFieldsForCollection).mockReturnValue([
+			{ field: 'id', type: 'integer' },
+			{ field: 'name', type: 'string' },
+			{ field: 'other', type: 'alias' },
+		] as Field[]);
+
+		const formatted = formatQuery({ collection: collectionName, key, query: { fields: ['id', 'translations.*'] } });
+
+		expect(formatted).toStrictEqual({
+			__aliasFor: collectionName,
+			__args: {},
+			id: true,
+			translations: { id: true, name: true },
 		});
 	});
 });
